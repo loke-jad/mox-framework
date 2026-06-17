@@ -1,0 +1,23 @@
+# Secrets — never commit
+.env
+*.env
+!config.example.env
+*.key
+*.pem
+
+# Per-agent runtime state (identity templates are committed; live state is not)
+agents/*/journal/
+agents/*/inbox/
+agents/*/outbox/
+agents/*/memory/
+
+# Python
+__pycache__/
+*.pyc
+
+# Editor / OS
+.DS_Store
+*.swp
+
+# local-only demo runner (fetches fleet key at runtime)
+demo-run.sh

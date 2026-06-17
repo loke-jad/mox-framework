@@ -1,0 +1,12 @@
+# mox-agent@<name>.service — one scheduled wake of an agent.
+# Installed (with {{REPO_ROOT}} substituted) by bin/spawn-agent --install-timer
+# into ~/.config/systemd/user/. Triggered by mox-agent-tick@<name>.timer.
+[Unit]
+Description=Mox-Framework agent %i — one wake
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory={{REPO_ROOT}}
+# Loads {{REPO_ROOT}}/.env (and agents/%i/.env) for MOX_LLM_* config.
+ExecStart=/usr/bin/env python3 {{REPO_ROOT}}/runtime/mox_agent.py --agent {{REPO_ROOT}}/agents/%i --once

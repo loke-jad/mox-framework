@@ -1,0 +1,14 @@
+# mox-agent-tick@<name>.timer — wakes the agent every {{EVERY}} seconds.
+# Enable: systemctl --user enable --now mox-agent-tick@<name>.timer
+[Unit]
+Description=Mox-Framework agent %i — wake schedule
+
+[Timer]
+OnBootSec=60
+OnUnitActiveSec={{EVERY}}s
+Persistent=true
+RandomizedDelaySec=30
+Unit=mox-agent@%i.service
+
+[Install]
+WantedBy=timers.target

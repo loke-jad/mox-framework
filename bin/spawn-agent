@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+# spawn-agent — scaffold a new persistent agent from the framework templates.
+#
+# Portable: plain bash + systemd --user (optional). No NixOS, no fleet paths.
+# Creates agents/<name>/ with the identity doc set, a starter task, and the
+# inbox/outbox/journal/memory scaffold. Optionally installs a user timer so the
+# agent wakes on a schedule.
+#
+# Usage:
+#   bin/spawn-agent <name> "<role one-liner>" [--install-timer] [--every SECONDS]
+#
+# Example:
+#   bin/spawn-agent scout "watches a topic and files a daily digest" --install-timer
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+TEMPLATES="$REPO_ROOT/framework/templates"
+
+NAME="${1:-}"
+ROLE="${2:-}"
+INSTALL_TIMER=0
+EVERY=3600
+
+if [[ -z "$NAME" || -z "$ROLE" ]]; then
+  echo "usage: spawn-agent <name> \"<role one-liner>\" [--install-timer] [--every SECONDS]" >&2
+  exit 2
+fi
+shift 2 || true
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --install-timer) INSTALL_TIMER=1 ;;
+    --every) EVERY="$2"; shift ;;
+    *) echo "unknown flag: $1" >&2; exit 2 ;;
+  esac
+  shift
+done
+
+# Lowercase, hyphen-safe slug for paths/units; ROLE word title-cased for docs.
+SLUG="$(echo "$NAME" | tr '[:upper:] ' '[:lower:]-')"
+AGENT_DIR="$REPO_ROOT/agents/$SLUG"
+
+if [[ -e "$AGENT_DIR" ]]; then
+  echo "agent already exists: $AGENT_DIR (refusing to overwrite)" >&2
+  exit 1
+fi
+
+echo "==> scaffolding $AGENT_DIR"
+mkdir -p "$AGENT_DIR"/{inbox,outbox,journal,memory}
+
+# Render each template, substituting {{NAME}} / {{ROLE}} / {{DATE}}.
+DATE="$(date +%F)"
+render() {
+  sed -e "s/{{NAME}}/$NAME/g" -e "s/{{SLUG}}/$SLUG/g" -e "s|{{ROLE}}|$ROLE|g" -e "s/{{DATE}}/$DATE/g" "$1"
+}
+for tpl in "$TEMPLATES"/*.md; do
+  base="$(basename "$tpl")"
+  out="${base/.template/}"
+  render "$tpl" > "$AGENT_DIR/$out"
+done
+
+# Seed a first task so the very first wake has something honest to read.
+cat > "$AGENT_DIR/Tasks.md" <<EOF
+# Tasks — $NAME
+
+## Active
+- [ ] First wake: read your own Soul.md / Rules.md / Agents.md and confirm you understand your lane ($ROLE).
+- [ ] Pick your friendly name and write your first journal line.
+
+## Perpetual
+- [ ] Keep Tasks.md honest — close what's done, add what's next.
+- [ ] Journal each wake.
+EOF
+
+echo "==> created $(find "$AGENT_DIR" -type f | wc -l) files"
+
+if [[ "$INSTALL_TIMER" == "1" ]]; then
+  if ! command -v systemctl >/dev/null 2>&1; then
+    echo "!! systemctl not found — skipping timer install (run the agent manually)" >&2
+  else
+    UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+    mkdir -p "$UNIT_DIR"
+    sed -e "s|{{REPO_ROOT}}|$REPO_ROOT|g" -e "s|{{EVERY}}|$EVERY|g" \
+      "$REPO_ROOT/systemd/mox-agent@.service" > "$UNIT_DIR/mox-agent@.service"
+    sed -e "s|{{EVERY}}|$EVERY|g" \
+      "$REPO_ROOT/systemd/mox-agent-tick@.timer" > "$UNIT_DIR/mox-agent-tick@.timer"
+    systemctl --user daemon-reload
+    systemctl --user enable --now "mox-agent-tick@$SLUG.timer"
+    echo "==> installed + started mox-agent-tick@$SLUG.timer (every ${EVERY}s)"
+    echo "    logs: journalctl --user -u mox-agent@$SLUG.service -f"
+  fi
+fi
+
+cat <<EOF
+
+Done. Next:
+  1. Configure your model endpoint (copy config.example.env -> .env and edit).
+  2. Run one wake:   python3 runtime/mox_agent.py --agent agents/$SLUG --once
+  3. (owner)         hand-edit agents/$SLUG/Soul.md to give it real personality.
+EOF
